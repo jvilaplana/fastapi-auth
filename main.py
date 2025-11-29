@@ -6,7 +6,7 @@ import models, schemas, auth, database
 import certifi
 
 app = FastAPI(
-    title="NodeCommander API (MongoDB)",
+    title="Sample FastAPI auth project",
     description="Distributed System Node Registry with OAuth2 + MongoDB Atlas",
     version="2.0.0"
 )
