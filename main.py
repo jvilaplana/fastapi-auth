@@ -2,20 +2,17 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
+from contextlib import asynccontextmanager
 import models, schemas, auth, database
 import certifi
 
-app = FastAPI(
-    title="Sample FastAPI auth project",
-    description="Distributed System Node Registry with OAuth2 + MongoDB Atlas",
-    version="2.0.0"
-)
 
-# --- LIFECYCLE EVENTS ---
+# LIFECYCLE EVENTS
 
-@app.on_event("startup")
-async def startup_db_client():
-    """Initialize MongoDB connection on startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup Logic
+    print("Starting up: Connecting to MongoDB... ", end='')
     database.db_manager.client = AsyncIOMotorClient(
         database.MONGO_URL,
         tls=True,
@@ -25,13 +22,25 @@ async def startup_db_client():
     
     # Create unique index for username to ensure no duplicates
     await database.db_manager.db["users"].create_index("username", unique=True)
+    print("[OK]")
+    
+    # The application runs while this yield is active
+    yield
+    
+    # Shutdown Logic
+    print("Shutting down: Closing MongoDB connection... ", end='')
+    if database.db_manager.client:
+        database.db_manager.client.close()
+    print("[OK]")
 
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    """Close MongoDB connection on shutdown."""
-    database.db_manager.client.close()
+app = FastAPI(
+    title="Sample FastAPI auth project",
+    description="Distributed System Node Registry with OAuth2 + MongoDB Atlas",
+    version="2.0.1",
+    lifespan=lifespan
+)
 
-# --- PUBLIC ROUTES ---
+# PUBLIC ROUTES
 
 @app.post("/register", response_model=schemas.UserResponse)
 async def register_user(user: schemas.UserCreate, db = Depends(database.get_db)):
@@ -80,7 +89,8 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-# --- PROTECTED ROUTES ---
+
+# PROTECTED ROUTES
 
 @app.get("/users/me", response_model=schemas.UserResponse)
 async def read_users_me(current_user: dict = Depends(auth.get_current_user)):
