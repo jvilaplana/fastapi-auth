@@ -1,9 +1,12 @@
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.middleware.cors import CORSMiddleware
 from datetime import timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 import models, schemas, auth, database
+from pathlib import Path
 import certifi
 
 
@@ -38,6 +41,19 @@ app = FastAPI(
     description="Distributed System Node Registry with OAuth2 + MongoDB Atlas",
     version="2.0.1",
     lifespan=lifespan
+)
+
+# CORS Configuration
+# This is necessary when the frontend runs on a different port or origin.
+# We set allow_origins=["*"] for development simplicity, allowing any origin
+# to connect to the API. In production, you would replace "*" with your 
+# specific frontend domain (e.g., "https://yourfrontend.com").
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allows all headers
 )
 
 # PUBLIC ROUTES
@@ -111,3 +127,17 @@ async def get_system_status(current_user: dict = Depends(auth.get_current_user))
         "role": current_user["role"],
         "backend": "MongoDB Atlas"
     }
+
+
+# Sample UI
+@app.get("/", response_class=HTMLResponse)
+async def read_root():
+    """
+    Reads the index.html file and serves it.
+    """
+    try:
+        with open("index.html", "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        print("ERROR: File not found")
+        return "<h1>Error: index.html not found. Please ensure it is in the same directory as main.py.</h1>"
