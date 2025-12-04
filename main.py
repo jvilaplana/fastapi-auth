@@ -6,6 +6,8 @@ from datetime import timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 import models, schemas, auth, database
+from logging_config import setup_logging
+import logging
 from pathlib import Path
 import certifi
 
@@ -15,7 +17,9 @@ import certifi
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup Logic
-    print("Starting up: Connecting to MongoDB... ", end='')
+    setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.info("Starting up: Connecting to MongoDB...")
     database.db_manager.client = AsyncIOMotorClient(
         database.MONGO_URL,
         tls=True,
@@ -25,16 +29,15 @@ async def lifespan(app: FastAPI):
     
     # Create unique index for username to ensure no duplicates
     await database.db_manager.db["users"].create_index("username", unique=True)
-    print("[OK]")
+    logger.info("MongoDB connected and index created.")
     
     # The application runs while this yield is active
     yield
     
     # Shutdown Logic
-    print("Shutting down: Closing MongoDB connection... ", end='')
     if database.db_manager.client:
         database.db_manager.client.close()
-    print("[OK]")
+    logger.info("Shutting down: MongoDB connection closed.")
 
 app = FastAPI(
     title="Sample FastAPI auth project",
@@ -64,9 +67,12 @@ async def register_user(user: schemas.UserCreate, db = Depends(database.get_db))
     Register a new Compute Node or Admin.
     Note the 'async def' and 'await' usage.
     """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Registering user: {user.username}")
     # Check if user exists
     existing_user = await db["users"].find_one({"username": user.username})
     if existing_user:
+        logger.warning(f"Registration failed: Username {user.username} already exists")
         raise HTTPException(status_code=400, detail="Username already registered")
     
     hashed_password = auth.get_password_hash(user.password)
@@ -83,6 +89,7 @@ async def register_user(user: schemas.UserCreate, db = Depends(database.get_db))
     # Fetch the created user to return it (to get the generated _id)
     created_user = await db["users"].find_one({"_id": new_user.inserted_id})
     
+    logger.info(f"User registered successfully: {user.username}")
     return created_user
 
 @app.post("/token", response_model=schemas.Token)
@@ -90,9 +97,12 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     """
     OAuth2 compliant token login.
     """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Login attempt for user: {form_data.username}")
     user = await db["users"].find_one({"username": form_data.username})
     
     if not user or not auth.verify_password(form_data.password, user["hashed_password"]):
+        logger.warning(f"Login failed for user: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -103,6 +113,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     access_token = auth.create_access_token(
         data={"sub": user["username"]}, expires_delta=access_token_expires
     )
+    logger.info(f"Login successful for user: {form_data.username}")
     return {"access_token": access_token, "token_type": "bearer"}
 
 

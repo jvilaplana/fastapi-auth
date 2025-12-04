@@ -7,6 +7,7 @@ from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, HTTPException, status
 import schemas, database
+import logging
 
 # --- CONFIGURATION ---
 load_dotenv()
@@ -33,7 +34,10 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
         expire = datetime.now(timezone.utc) + timedelta(minutes=15)
     
     to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Created access token for user: {data.get('sub')}")
     return encoded_jwt
 
 # --- DEPENDENCIES ---
@@ -47,13 +51,16 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db = Depends(dat
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    logger = logging.getLogger(__name__)
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
+            logger.warning("Token validation failed: No username in payload")
             raise credentials_exception
         token_data = schemas.TokenData(username=username)
-    except JWTError:
+    except JWTError as e:
+        logger.warning(f"Token validation failed: {str(e)}")
         raise credentials_exception
     
     # Async MongoDB call

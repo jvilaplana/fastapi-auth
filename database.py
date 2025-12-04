@@ -2,6 +2,7 @@ import os
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 import certifi
+import logging
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -26,6 +27,8 @@ async def get_db():
     to open/close connections per request like we do with SQL sessions.
     """
     if db_manager.db is None:
+        logger = logging.getLogger(__name__)
+        logger.info("Initializing MongoDB connection...")
         # Lazy initialization if needed, though main.py usually handles startup
         db_manager.client = AsyncIOMotorClient(
             MONGO_URL,
