@@ -1,8 +1,8 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import timedelta
+from datetime import timedelta, datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 import models, schemas, auth, database
@@ -10,6 +10,12 @@ from logging_config import setup_logging
 import logging
 from pathlib import Path
 import certifi
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+def print_time():
+    """job to print time every minute."""
+    logger = logging.getLogger(__name__)
+    logger.info(f"Current time: {datetime.now()}")
 
 
 # LIFECYCLE EVENTS
@@ -30,11 +36,17 @@ async def lifespan(app: FastAPI):
     # Create unique index for username to ensure no duplicates
     await database.db_manager.db["users"].create_index("username", unique=True)
     logger.info("MongoDB connected and index created.")
+
+    # Start Scheduler
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(print_time, 'interval', seconds=60)
+    scheduler.start()
     
     # The application runs while this yield is active
     yield
     
     # Shutdown Logic
+    scheduler.shutdown()
     if database.db_manager.client:
         database.db_manager.client.close()
     logger.info("Shutting down: MongoDB connection closed.")
@@ -113,8 +125,49 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     access_token = auth.create_access_token(
         data={"sub": user["username"]}, expires_delta=access_token_expires
     )
+    refresh_token = auth.create_refresh_token(
+        data={"sub": user["username"]}
+    )
     logger.info(f"Login successful for user: {form_data.username}")
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+
+@app.post("/refresh", response_model=schemas.Token)
+async def refresh_token(refresh_token: str = Depends(auth.oauth2_scheme), db = Depends(database.get_db)):
+    """
+    Get a new access token using a refresh token.
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        username = auth.verify_refresh_token(refresh_token)
+    except HTTPException:
+        logger.warning("Refresh token validation failed")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Check if user still exists
+    user = await db["users"].find_one({"username": username})
+    if not user:
+        logger.warning(f"Refresh failed: User {username} not found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": username}, expires_delta=access_token_expires
+    )
+    # Optionally rotate refresh token here
+    new_refresh_token = auth.create_refresh_token(
+        data={"sub": username}
+    )
+    
+    logger.info(f"Token refreshed for user: {username}")
+    return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
 
 
 # PROTECTED ROUTES

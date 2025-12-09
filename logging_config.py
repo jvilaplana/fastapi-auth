@@ -36,4 +36,4 @@ def setup_logging():
     )
     
     # Set lower level for some noisy libraries if needed
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.DEBUG)
